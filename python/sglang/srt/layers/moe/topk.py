@@ -424,6 +424,7 @@ def select_experts(
     routed_scaling_factor: Optional[float] = None,
     num_token_non_padded: Optional[torch.Tensor] = None,
     expert_location_dispatch_info: Optional[ExpertLocationDispatchInfo] = None,
+    fake_topk_ids: Optional[torch.Tensor] = None,
 ):
     router_logits, correction_bias = (
         expert_location_dispatch.transform_select_experts_inputs(
@@ -498,5 +499,6 @@ def select_experts(
         )
 
     get_global_expert_distribution_recorder().on_select_experts(topk_ids=topk_ids)
-
+    if fake_topk_ids is not None:
+        topk_ids = fake_topk_ids[:topk_ids.shape[0]]
     return topk_weights, topk_ids

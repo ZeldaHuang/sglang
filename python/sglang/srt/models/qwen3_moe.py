@@ -148,6 +148,13 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
                 async_finish=True,  # TODO
                 return_recv_hook=True,
             )
+            max_num_batched_tokens = 32768
+            self.topk_ids = torch.arange(
+                max_num_batched_tokens * self.top_k,
+                dtype=torch.int32,
+                device='cuda',
+            ).roll(self.layer_id).reshape(max_num_batched_tokens, self.top_k)
+            self.topk_ids = self.topk_ids % self.num_experts
 
     def forward(
         self, hidden_states: torch.Tensor, forward_batch: Optional[ForwardBatch] = None
@@ -258,6 +265,10 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
             with get_global_expert_distribution_recorder().with_current_layer(
                 self.layer_id
             ):
+                if global_server_args_dict["ep_dispatch_algorithm"] == "fake":
+                    fake_topk_ids = self.topk_ids
+                else:
+                    fake_topk_ids = None
                 state.topk_weights_local, state.topk_idx_local = select_experts(
                     hidden_states=hidden_states,
                     router_logits=router_logits,
@@ -268,6 +279,7 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
                     expert_location_dispatch_info=ExpertLocationDispatchInfo.init_new(
                         layer_id=self.layer_id,
                     ),
+                    fake_topk_ids=fake_topk_ids,
                 )
         else:
             state.topk_idx_local = torch.full(

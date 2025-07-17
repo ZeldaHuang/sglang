@@ -239,6 +239,7 @@ class _DeepEPDispatcherImplNormal(_DeepEPDispatcherImplBase):
         if deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM:
             # TODO hard code 128 block quant,use fp8 communication
             hidden_states = sglang_per_token_group_quant_fp8(hidden_states, 128)
+            # logger.info(f"after dispatch_a, {hidden_states[0]=}, {hidden_states[1]=}")
         previous_event = Buffer.capture() if self.async_finish else None
         return hidden_states, topk_idx, topk_weights, previous_event
 
@@ -254,6 +255,7 @@ class _DeepEPDispatcherImplNormal(_DeepEPDispatcherImplBase):
                 hidden_states, topk_idx, topk_weights, previous_event
             )
             event.current_stream_wait() if self.async_finish else ()
+            # logger.info(f"after dispatch_b, {hidden_states[0]=}, {hidden_states[1]=}")
             return (
                 hidden_states,
                 topk_idx,
@@ -439,8 +441,11 @@ class _DeepEPDispatcherImplNormal(_DeepEPDispatcherImplBase):
         return output, previous_event
 
     def combine_b(self, output, previous_event):
+        # output.fill_(1)
+        # logger.info(f"before combine_b {output=}")
         hidden_states, event = self._combine_core(output, previous_event)
         event.current_stream_wait() if self.async_finish else ()
+        # logger.info(f"Combine B done. {hidden_states=}")
         self.handle = None
         self.src2dst = None
         return hidden_states

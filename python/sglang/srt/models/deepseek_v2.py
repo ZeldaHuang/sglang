@@ -337,6 +337,13 @@ class DeepseekV2MoE(nn.Module):
             )
 
         self._enable_deepep_moe = global_server_args_dict["enable_deepep_moe"]
+        max_num_batched_tokens = 32768
+        self.topk_ids = torch.arange(
+            max_num_batched_tokens * self.top_k,
+            dtype=torch.int32,
+            device='cuda',
+        ).roll(self.layer_id).reshape(max_num_batched_tokens, self.top_k)
+        self.topk_ids = self.topk_ids % self.num_experts
 
     def get_moe_weights(self):
         return [
@@ -505,6 +512,10 @@ class DeepseekV2MoE(nn.Module):
             with get_global_expert_distribution_recorder().with_current_layer(
                 self.layer_id
             ):
+                if global_server_args_dict["ep_dispatch_algorithm"] == "fake":
+                    fake_topk_ids = self.topk_ids
+                else:
+                    fake_topk_ids = None
                 state.topk_weights_local, state.topk_idx_local = select_experts(
                     hidden_states=hidden_states,
                     router_logits=router_logits,
@@ -520,6 +531,7 @@ class DeepseekV2MoE(nn.Module):
                     expert_location_dispatch_info=ExpertLocationDispatchInfo.init_new(
                         layer_id=self.layer_id,
                     ),
+                    fake_topk_ids=fake_topk_ids,
                 )
         else:
             state.topk_idx_local = torch.full(
@@ -532,6 +544,8 @@ class DeepseekV2MoE(nn.Module):
     def op_dispatch_a(self, state):
         if self.ep_size > 1:
             # TODO(ch-wan): allow users to set num_max_dispatch_tokens_per_rank value
+            # state.hidden_states_mlp_input.fill_(1)
+            # logger.info(f"before dispatch_a, {state.hidden_states_mlp_input=}")
             self.deepep_dispatcher.dispatch_a(
                 hidden_states=state.hidden_states_mlp_input,
                 topk_idx=state.pop("topk_idx_local"),
@@ -570,6 +584,7 @@ class DeepseekV2MoE(nn.Module):
             num_recv_tokens_per_expert=state.pop("num_recv_tokens_per_expert"),
             forward_mode=state.forward_batch.forward_mode,
         )
+        # logger.info(f"{state.hidden_states_experts_output=}")
 
     def op_combine_a(self, state):
         if self.ep_size > 1:
